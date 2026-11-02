@@ -11,9 +11,6 @@ const DEFAULTS = {
   '曝光表_沒勾要截圖但有截圖也放入': false,
   '曝光表_渠道欄位': '渠道類別',
   '曝光表_時間欄位': '曝光時間',
-  '曝光表_狀態欄位': '曝光狀態',
-  '曝光表_備註欄位': '曝光備註',
-  '曝光表_負責人欄位': '渠道 Owner',
   '曝光表_截圖欄位': '曝光截圖提供',
   '曝光表_連結欄位': '曝光連結提供',
   '每頁最多幾張截圖': 4,
@@ -107,9 +104,6 @@ async function readExposures(p, onProgress) {
     need: byName(fs, CFG['曝光表_要截圖欄位']),
     channel: byName(fs, CFG['曝光表_渠道欄位']),
     time: byName(fs, CFG['曝光表_時間欄位']),
-    status: byName(fs, CFG['曝光表_狀態欄位']),
-    note: byName(fs, CFG['曝光表_備註欄位']),
-    owner: byName(fs, CFG['曝光表_負責人欄位']),
     shots: byName(fs, CFG['曝光表_截圖欄位']),
     link: byName(fs, CFG['曝光表_連結欄位']),
   };
@@ -120,12 +114,12 @@ async function readExposures(p, onProgress) {
     const shotVal = F.shots ? await t.getCellValue(F.shots.id, rid).catch(() => null) : null;
     const shotCount = Array.isArray(shotVal) ? shotVal.length : 0;
     if (!need && !(CFG['曝光表_沒勾要截圖但有截圖也放入'] && shotCount)) { skipped++; onProgress?.(++done, p.ids.length); return; }
-    const [channel, timeStr, status, note, owner, linkStr] = await Promise.all([F.channel, F.time, F.status, F.note, F.owner, F.link].map((f) => str(t, f, rid)));
+    const [channel, timeStr, linkStr] = await Promise.all([F.channel, F.time, F.link].map((f) => str(t, f, rid)));
     const timeRaw = F.time ? await t.getCellValue(F.time.id, rid).catch(() => null) : null;
     let urls = [];
     if (shotsField && shotCount) { try { urls = (await shotsField.getAttachmentUrls(rid)) || []; } catch { urls = []; } }
     const links = [...new Set((linkStr.match(URL_RE) || []))];
-    items.push({ rid, channel: channel || '未填渠道', timeStr, timeRaw: typeof timeRaw === 'number' ? timeRaw : Infinity, status, note, owner, linkText: linkStr, links, urls, shots: [] });
+    items.push({ rid, channel: channel || '未填渠道', timeStr, timeRaw: typeof timeRaw === 'number' ? timeRaw : Infinity, linkText: linkStr, links, urls, shots: [] });
     onProgress?.(++done, p.ids.length);
   })(), 20000, '讀取曝光需求').catch(() => { skipped++; })));
   items.sort((a, b) => a.channel.localeCompare(b.channel, 'zh-Hant') || a.timeRaw - b.timeRaw);
@@ -200,13 +194,13 @@ async function buildPptx(title, cover, items) {
       const s = pptx.addSlide();
       const pages = Math.ceil(items.length / ROWS);
       header(pptx, s, pages > 1 ? `曝光總覽（${i / ROWS + 1}/${pages}）` : '曝光總覽', `${title}`);
-      const hdr = ['渠道', '曝光時間', '狀態', '截圖', '連結'].map((t) => ({ text: t, options: { bold: true, color: MUTED, fill: { color: 'F6F7F9' } } }));
+      const hdr = ['渠道', '曝光時間', '截圖', '連結'].map((t) => ({ text: t, options: { bold: true, color: MUTED, fill: { color: 'F6F7F9' } } }));
       const rows = items.slice(i, i + ROWS).map((it) => [
-        clip(it.channel, 30), it.timeStr || '—', it.status || '—',
+        clip(it.channel, 30), it.timeStr || '—',
         { text: it.shots.length ? `${it.shots.length} 張` : '待補', options: { color: it.shots.length ? INK : 'B45309' } },
         { text: it.links.length ? '有' : '待補', options: { color: it.links.length ? INK : 'B45309' } },
       ]);
-      s.addTable([hdr, ...rows], { x: 0.6, y: 1.6, w: 12.13, colW: [4.4, 2.6, 2.2, 1.4, 1.53], fontSize: 12, fontFace: FONT, color: INK, border: { type: 'solid', pt: 0.5, color: 'E5E7EB' }, rowH: 0.38, valign: 'middle' });
+      s.addTable([hdr, ...rows], { x: 0.6, y: 1.6, w: 12.13, colW: [5.2, 3.0, 1.8, 2.13], fontSize: 12, fontFace: FONT, color: INK, border: { type: 'solid', pt: 0.5, color: 'E5E7EB' }, rowH: 0.38, valign: 'middle' });
     }
   }
 
@@ -218,20 +212,14 @@ async function buildPptx(title, cover, items) {
     chunks.forEach((chunk, ci) => {
       const s = pptx.addSlide();
       const t = chunks.length > 1 ? `${it.channel}（${ci + 1}/${chunks.length}）` : it.channel;
-      header(pptx, s, t, [it.timeStr, it.status].filter(Boolean).join(' · ') || '曝光時間待補');
-      let y = 1.5;
-      if (it.note) {
-        s.addText(clip(it.note.replace(/\s+/g, ' '), 140), { x: 0.6, y, w: 12.1, h: 0.5, fontSize: 12, color: INK, fontFace: FONT, margin: 0, valign: 'top', fit: 'shrink' });
-        y += 0.55;
-      }
-      const top = y + 0.1, bottom = 6.45;
+      header(pptx, s, t, it.timeStr || '曝光時間待補');
+      const top = 1.6, bottom = 6.45;
       if (chunk.length) grid(pptx, s, chunk, 0.6, top, 12.13, bottom);
       else placeholder(pptx, s, 0.6, top, 12.13, bottom - top, '截圖待補');
       const linkRuns = it.links.length
         ? [{ text: '連結：', options: { color: MUTED } }, { text: clip(it.links[0], 85), options: { color: LINK, underline: true, hyperlink: { url: it.links[0] } } }]
         : [{ text: '連結：', options: { color: MUTED } }, { text: it.linkText ? clip(it.linkText, 85) : '待補', options: { color: it.linkText ? INK : 'B45309' } }];
-      s.addText(linkRuns, { x: 0.6, y: 6.6, w: 9.4, h: 0.35, fontSize: 12, fontFace: FONT, margin: 0 });
-      if (it.owner) s.addText(`渠道 Owner：${it.owner}`, { x: 10.1, y: 6.6, w: 2.63, h: 0.35, fontSize: 11, color: MUTED, fontFace: FONT, margin: 0, align: 'right' });
+      s.addText(linkRuns, { x: 0.6, y: 6.6, w: 12.13, h: 0.35, fontSize: 12, fontFace: FONT, margin: 0 });
     });
   }
   return pptx;
